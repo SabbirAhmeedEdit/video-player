@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Professional Video Player</title>
+    
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <link href="https://unpkg.com/@videojs/themes@1/dist/fantasy/index.css" rel="stylesheet" />
+
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: #f0f2f5; }
+        .container { max-width: 900px; margin: 0 auto; }
+        
+        /* Professional Control Panel */
+        .controls { 
+            background: #fff; padding: 25px; border-radius: 12px; 
+            margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); 
+        }
+        .input-group { margin-bottom: 15px; display: flex; gap: 10px; }
+        input[type="text"] { flex-grow: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+        button#load-url { padding: 10px 20px; cursor: pointer; background: #1a73e8; color: white; border: none; border-radius: 6px; font-weight: 600; }
+        
+        /* Overlays */
+        .vjs-ad-banner { 
+            display: none; position: absolute; top: 0; left: 0; width: 100%;
+            background: rgba(255, 204, 0, 0.95); color: #000; padding: 12px; 
+            text-align: center; font-weight: bold; z-index: 10; font-size: 1.1em;
+        }
+        .vjs-skip-button {
+            display: none; position: absolute; bottom: 80px; right: 20px;
+            background: rgba(0, 0, 0, 0.85); color: white; border: 1px solid #fff;
+            padding: 12px 24px; cursor: pointer; z-index: 11; border-radius: 4px;
+        }
+        
+        .video-js { width: 100%; height: 500px; border-radius: 12px; overflow: hidden; background-color: #000; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="controls">
+        <div class="input-group">
+            <input type="text" id="online-url" placeholder="Paste Google Drive, Dropbox, or MP4 link here...">
+            <button id="load-url">Play Video</button>
+        </div>
+        <div style="margin-top: 10px;">
+            <label style="font-size: 0.9em; color: #666;">Or upload local file:</label><br>
+            <input type="file" id="video-upload" accept="video/*">
+        </div>
+    </div>
+
+    <video id="my-video" class="video-js vjs-theme-fantasy" controls preload="auto"></video>
+</div>
+
+<script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+
+<script>
+    // ==========================================
+    // 1. ADS CONFIGURATION SECTION (EDIT HERE)
+    // ==========================================
+    const MY_ADS_LIBRARY = [
+        'https://vjs.zencdn.net/v/oceans.mp4',
+        'https://video-previews.elements.envatousercontent.com/h264-video-previews/d4ee4505-a7a3-4ac4-8950-0daf64e06c23/60602507.mp4',
+        'https://media.w3.org/2010/05/sintel/trailer.mp4'
+        // Add more ad links as needed...
+    ];
+
+    const AD_BREAK_TIMESTAMPS = [30, 90, 180, 600]; // Seconds when ads play
+    const SKIP_TIMER_SECONDS = 10; // How long until skip appears
+    // ==========================================
+
+    const player = videojs('my-video');
+
+    // UI Elements setup
+    const adBanner = document.createElement('div');
+    adBanner.className = 'vjs-ad-banner';
+    player.el().appendChild(adBanner);
+
+    const skipButton = document.createElement('button');
+    skipButton.className = 'vjs-skip-button';
+    skipButton.innerHTML = 'Skip Ad &raquo;';
+    player.el().appendChild(skipButton);
+
+    // State Tracking
+    let mainMovieSrc = ''; 
+    let pendingAds = []; 
+    let isPlayingAd = false;
+    let isFirstAd = false; 
+    let resumeTime = 0;
+
+    // Direct link conversion for cloud storage
+    function getDirectUrl(url) {
+        if (url.includes('drive.google.com')) {
+            const match = url.match(/[-\w]{25,}/);
+            return match ? `https://drive.google.com/uc?export=download&id=${match[0]}` : url;
+        }
+        if (url.includes('dropbox.com')) {
+            return url.replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace('?dl=0', '');
+        }
+        return url;
+    }
+
+    // Main Loader
+    function setupNewMovie(source) {
+        if (!source) return;
+        mainMovieSrc = source;
+        pendingAds = [...AD_BREAK_TIMESTAMPS]; 
+        
+        // Check for saved progress
+        const saved = localStorage.getItem('progress_' + btoa(mainMovieSrc).substring(0,12));
+        resumeTime = saved ? parseFloat(saved) : 0;
+
+        startAd(true); // Trigger 1st ad (Pre-roll)
+    }
+
+    function startAd(isPreRoll = false) {
+        isPlayingAd = true;
+        isFirstAd = isPreRoll;
+        
+        if (!isFirstAd) {
+            resumeTime = player.currentTime();
+        }
+
+        // Hide banner for 1st ad per request
+        adBanner.style.display = isFirstAd ? 'none' : 'block';
+        
+        // Hide skip button initially
+        skipButton.style.display = 'none';
+        
+        player.controls(false); 
+
+        // Select random ad from your library
+        const randomAd = MY_ADS_LIBRARY[Math.floor(Math.random() * MY_ADS_LIBRARY.length)];
+        player.src({ type: 'video/mp4', src: randomAd });
+        player.play();
+    }
+
+    function returnToMovie() {
+        isPlayingAd = false;
+        adBanner.style.display = 'none';
+        skipButton.style.display = 'none';
+        player.controls(true);
+        
+        player.src({ type: 'video/mp4', src: mainMovieSrc });
+        
+        player.one('loadedmetadata', () => {
+            player.currentTime(resumeTime);
+            player.play();
+        });
+    }
+
+    // Event Listeners
+    player.on('timeupdate', function() {
+        if (!mainMovieSrc) return;
+
+        if (!isPlayingAd) {
+            const currentTime = Math.floor(player.currentTime());
+            if (pendingAds.length > 0 && currentTime >= pendingAds[0]) {
+                pendingAds.shift(); 
+                startAd(false);
+            }
+            // Background save progress
+            localStorage.setItem('progress_' + btoa(mainMovieSrc).substring(0,12), player.currentTime());
+        } else {
+            // Only show banner for mid-roll ads
+            if (!isFirstAd) {
+                const timeLeft = Math.ceil(player.duration() - player.currentTime());
+                adBanner.innerHTML = `Sponsor Break - Resuming in ${timeLeft > 0 ? timeLeft : 0}s`;
+            }
+
+            // Skip button logic: Hide for 1st ad, show after 10s for others
+            if (!isFirstAd && player.currentTime() >= SKIP_TIMER_SECONDS) {
+                skipButton.style.display = 'block';
+            }
+        }
+    });
+
+    document.getElementById('load-url').addEventListener('click', () => {
+        const urlInput = document.getElementById('online-url').value;
+        setupNewMovie(getDirectUrl(urlInput));
+    });
+
+    document.getElementById('video-upload').addEventListener('change', (e) => {
+        if (e.target.files[0]) {
+            setupNewMovie(URL.createObjectURL(e.target.files[0]));
+        }
+    });
+
+    skipButton.onclick = returnToMovie;
+    player.on('ended', () => { if (isPlayingAd) returnToMovie(); });
+</script>
+
+</body>
+</html>
